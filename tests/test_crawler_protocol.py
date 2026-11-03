@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import Mock
+from urllib.parse import quote
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -180,6 +181,40 @@ class CrawlerProtocolTests(unittest.TestCase):
                         self.assertEqual(fields["code"], "source_unavailable")
                         self.assertTrue(fields["retryable"])
                         self.assertEqual(self.server.requests[path] - before, count)
+
+    def test_91porn_detail_preserves_signed_media_url(self):
+        module = self.modules["91Porn/91Porn.py"]
+        url = ("https://media.example//mp43/1257203.mp4"
+               "?st=a%2Fb%2Bc%3D&e=1793719366&k=46c03b&f=x%26y%3Dz")
+        source = '<source src="%s" type="video/mp4">' % url.replace("&", "&amp;")
+        pages = {
+            "strencode2": '<script>document.write(strencode2("%s"));</script>' % quote(source, safe=""),
+            "source": "<video>" + source + "</video>",
+            "plain_url": '<script>const media = "%s";</script>' % url,
+        }
+        with self.crawler(module) as crawler:
+            for name, text in pages.items():
+                with self.subTest(format=name):
+                    detail = crawler.spider.parse_detail_page(text, self.base_url)
+                    self.assertEqual(detail["video_url"], url)
+                    self.assertEqual(detail["source_id"], "1257203")
+
+    def test_91porn_resolve_preserves_signed_media_url(self):
+        module = self.modules["91Porn/91Porn.py"]
+        url = ("https://media.example//mp43/1257203.mp4"
+               "?st=a%2Fb%2Bc%3D&e=1793719366&k=46c03b&f=x%26y%3Dz")
+        source = "<source src='%s' type='video/mp4'>" % url
+        text = ('<title>Test video - 91porn</title>'
+                '<video><source src="https://ads.example/placeholder.mp4">'
+                '<script>document.write(strencode2("%s"));</script></video>') % quote(source, safe="")
+        candidate = dict(discovery_key="viewkey:test", source_id="test", locator=dict(viewkey="test"))
+        with self.crawler(module) as crawler:
+            crawler.fetch_page = Mock(return_value=text)
+            crawler.metadata["test"] = dict(source_id="1257203")
+            item = crawler.resolve(candidate, self.deadline(module, "item"))
+            self.assertEqual(item["media"]["url"], url)
+            self.assertEqual(item["source_id"], candidate["source_id"])
+            self.assertEqual(item["title"], "Test video")
 
     def test_91porn_job_ignores_legacy_max_pages(self):
         module = self.modules["91Porn/91Porn.py"]

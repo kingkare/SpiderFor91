@@ -439,8 +439,8 @@ class Porn91Spider:
 
                 src_match = re.search(r"src=['\"]([^'\"]+)['\"]", decoded)
                 if src_match:
+                    # 保留源站签名 URL 的原始路径；合并双斜杠可能返回提示视频。
                     video_url = urljoin(base_url, html.unescape(src_match.group(1)))
-                    video_url = re.sub(r'(https?://[^/]+)//+', r'\1/', video_url)
                     result["video_url"] = video_url
                     result["source_id"] = self._extract_source_id(video_url)
                     return result
@@ -479,7 +479,8 @@ class Porn91Spider:
 
     def _extract_source_id(self, video_url: str) -> str:
         path = urlparse(video_url or "").path
-        name = os.path.basename(path)
+        # URL 路径使用 / 分隔，避免 Windows 将 // 开头的路径视为 UNC。
+        name = path.rsplit("/", 1)[-1]
         stem, ext = os.path.splitext(name)
         if ext.lower() not in {".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi"}:
             return ""
